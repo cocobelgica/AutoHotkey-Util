@@ -1,32 +1,44 @@
 /* Function: Exec
  *     Mod of HotKeyIt's DynaRun() - run dynamic AHK code through named pipe(s)
  * Syntax:
- *     pid := Exec( code [ , kwargs, args* ] )
+ *     pid := Exec( code [ , args, kwargs* ] )
  * Return Value:
  *     PID of the newly launched script
  * Parameter(s:)
- *     code              [in] - AHK code to run/execute
- *     kwargs       [in, opt] - options, an associative array with the following
- *                              fields: name - pipe name, dir - working directory,
- *                              opt - [Hide, Min, Max], ahk - AHK executable
- *     args*   [in, variadic] - command line arguments to pass to the script
+ *     code               [in] - AHK code to run/execute
+ *     args          [in, opt] - array of command line arguments to pass to the
+ *                               script
+ *     kwargs*  [in, variadic] - string in the following format: 'option=value',
+ *                               where 'option' can be any of the following:
+ *                               'name' - pipe name; 'dir' - working directory;
+ *                               'opt' - [Hide, Min, Max]; 'ahk' - AutoHotkey.exe
+ * Example:
+ *     pid := Exec("MsgBox", ["arg"], "name=some_name", "dir=C:\Users")
  * Remarks:
- *     Default for 'kwargs' field(s), if 'dir' is not supplied, A_WorkingDir is
- *     used, 'ahk' defaults to A_AhkPath and 'opt' defaults to "Hide".
+ *     Default for 'kwargs' "option", if 'dir' is not supplied, A_WorkingDir is
+ *     used, 'ahk' defaults to A_AhkPath and 'opt' defaults to "Hide". A random
+ *     value is generated if 'name' is not specified.
  * Credits:
  *     - Lexikos for his demonstration [http://goo.gl/5IkP5R]
  *     - HotKeyIt for DynaRun() [http://goo.gl/92BBMr]
  */
-Exec(code, kwargs:="", args*)
+Exec(code, args:="", kwargs*)
 {
 	static default := { "name": "", "dir": "", "opt": "Hide", "ahk": A_AhkPath }
 	
-	if !IsObject(kwargs)
-		kwargs := {}
+	n := NumGet(&kwargs + 4*A_PtrSize) ;// ObjCount()
 	for option, value in default
-		%option% := kwargs.HasKey(option) ? kwargs[option] : value
-	if (name == "")
-		name := "AHK_" . A_TickCount
+	{
+		if !kwargs.HasKey(option) ;// if not specified
+			%option% := option != "name" ? value : "AHK_" . A_TickCount
+		if (A_Index > n) || !(arg := kwargs[A_Index])
+			continue
+		if ( option := SubStr(arg, 1, (i := InStr(arg, "="))-1) )
+			kwargs[option] := %option% := SubStr(arg, i+1)
+	}
+	static q := Chr(34) ;// double quote("), for v1.1 and v2.0-a compatibility
+	for i, arg in args
+		args .= " " . q . arg . q
 	
 	pipe := []
 	Loop 2 {
@@ -47,9 +59,6 @@ Exec(code, kwargs:="", args*)
 			      . "`nA_LastError: " . A_LastError
 	}
 
-	static q := Chr(34) ;// double quote("), for v1.1 and v2.0-a compatibility
-	for i, arg in args
-		args .= " " . q . arg . q
 	Run "%ahk%" "\\.\pipe\%name%" %args%, %dir%, %opt% UseErrorLevel, pid
 	if ErrorLevel
 		MsgBox, 262144,, Could not open file:`n%ahk%\\.\pipe\%name%
