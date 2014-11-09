@@ -1,62 +1,55 @@
-/* Function:    CpyData_Send
+/* Function: CpyData_Send
  *     Send a string to another script using WM_COPYDATA
- * Syntax:    el := CpyData_Send( str, rcvr )
+ * Syntax:
+ *     el := CpyData_Send( str, rcvr [ , data := 0 ] )
  * Return Value:
  *     SendMessage %WM_COPYDATA% ErrorLevel
  * Parameters:
- *     str   [in, ByRef] - string to send
+ *     str   [in, ByRef] - string to send (lpData member of COPYDATASTRUCT)
  *     rcvr         [in] - receiver script, argument can be anything that fits
  *                         the WinTitle parameter.
+ *     data    [in, opt] - dwData member of COPYDATASTRUCT
  */
-CpyData_Send(ByRef str, rcvr) {
-	VarSetCapacity(CDS, 3*A_PtrSize, 0)
-	, NumPut( (StrLen(str)+1) * (A_IsUnicode ? 2 : 1), CDS, A_PtrSize )
-	, NumPut(&str, CDS, 2*A_PtrSize)
+CpyData_Send(ByRef str, rcvr, data:=0)
+{
+	VarSetCapacity(CDS, 4 + 2*A_PtrSize, 0)           ; http://goo.gl/9wOljy
+	, NumPut(&str                                     ; lpData
+	, NumPut((StrLen(str)+1) * (A_IsUnicode ? 2 : 1)  ; cbData
+	, NumPut(data, CDS), "UInt"))                     ; dwData
 	
-	DetectHiddenWindows % (dhw := A_DetectHiddenWindows) ? "On" : "On"
-	SetTitleMatchMode % (tmm := A_TitleMatchMode) ? 2 : 2
-	SendMessage 0x4a, %A_ScriptHwnd%, % &CDS,, % "ahk_id " WinExist(rcvr)
-	DetectHiddenWindows %dhw%
-	SetTitleMatchMode %tmm%
+	prev_DHW := A_DetectHiddenWindows, prev_TMM := A_TitleMatchMode
+	DetectHiddenWindows On
+	SetTitleMatchMode 2
+	SendMessage 0x4a, %A_ScriptHwnd%, % &CDS,, % "ahk_id " . WinExist(rcvr)
+	DetectHiddenWindows %prev_DHW%
+	SetTitleMatchMode %prev_TMM%
 	
 	return ErrorLevel
 }
-/* Function:    CpyData_SetF
- *     Set the handler function to call anytime a scripts receives WM_COPYDATA
- * Syntax:    CpyData_SetF( fn )
+/* Function: CpyData_OnRcv
+ *     Set the callback function to call anytime a scripts receives WM_COPYDATA
+ * Syntax:
+ *     CpyData_OnRcv( [ fn ] )
  * Parameters:
- *     fn      [in, opt] - name of the function, accepts a Func object. If
- *                         omitted, The current function (Func object) used as
- *                         the handler is returned. If explicitly blank (""),
+ *     fn      [in, opt] - a callback function, either the name or a Func object.
+ *                         If omitted, the current callback function(if any) is
+ *                         returned as a Func object. If explicitly blank (""),
  *                         monitoring is disabled.
  */
-CpyData_SetF(fn:=0) {
-	if IsFunc(fn) {
-		_CpyDataRcv( fn := IsObject(fn) ? fn : Func(fn), [] )
-		if ( OnMessage(0x4a) != "_CpyDataRcv" )
-			OnMessage(0x4a, "_CpyDataRcv")
-		return true
-	}
-	if (fn == "")
-		OnMessage(0x4a, "")
-	return !fn ? _CpyDataRcv( fn, [] ) : ""
+CpyData_OnRcv(fn:=0) ;// GET=0, SET=Func, DEL=""
+{	
+	return _CpyData_OnRcv(fn ? (IsObject(fn) ? fn : Func(fn)) : fn, "CPYDATA")
 }
 /* PRIVATE
  */
-_CpyDataRcv(wParam, lParam) {
-	static handler, data, str, sender
+_CpyData_OnRcv(wParam, lParam) ;// wParam=hSender, lParam=COPYDATASTRUCT
+{
+	static callback
 	
-	if IsObject(lParam) ;// called by CpyData_SetF()
-		return wParam == 0 ? handler : handler := wParam
+	if (lParam == "CPYDATA") ;// called by CpyData_OnRcv()
+		return wParam == 0 ? callback : OnMessage(0x4a, (callback := wParam) ? A_ThisFunc : "")
 	
-	data     := NumGet(lParam + 0)
-	, str    := StrGet( NumGet(lParam + 2*A_PtrSize) )
-	, sender := wParam
-	if IsFunc(handler)
-		SetTimer _cpydata_rcv, -1
+	;// args := [ lpData, hSender, dwData ]
+	%callback%(StrGet(NumGet(lParam + 2*A_PtrSize)), wParam, NumGet(lParam + 0))
 	return true
-
-_cpydata_rcv:
-	%handler%(str, sender, data)
-	return
 }
