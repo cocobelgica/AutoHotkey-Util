@@ -1,21 +1,22 @@
-vtype(var, assert:="") {
-	static is_v2 := A_AhkVersion >= "2"
-	     , type  := is_v2 ? Func("Type") : ""
-	     , regex := RegExMatch("", is_v2? "" : "O)", regex) ? regex : 0
+vtype(v, assert:="")
+{
+	static is_v2  := A_AhkVersion >= "2"
+	static Type   := is_v2 ? Func("Type") : ""
+	static RgxObj := is_v2 ? "" : (m, RegExMatch("", "O)", m))
 
 	if is_v2
-		t := %type%(var) ;// use v2.0-a buil-in Type()
+		t := %Type%(v) ;// use v2.0-a built-in Type()
 
-	else if IsObject(var) {
-		t := ObjGetCapacity(var) != ""      ? "Object"
-		  :  IsFunc(var)                    ? "Func"
-		  :  ComObjType(var) != ""          ? "ComObject"
-		  :  NumGet(&var) == NumGet(&regex) ? "RegExMatchObject"
+	else if IsObject(v)
+		t := ObjGetCapacity(v) != ""        ? "Object"
+		  :  IsFunc(v)                      ? "Func"
+		  :  ComObjType(v) != ""            ? "ComObject"
+		  :  NumGet(&v) == NumGet(&RgxObj)  ? "RegExMatchObject"
+		  :  IsFunc(v.get) || IsFunc(v.set) ? "Property"
 		  :                                   "FileObject"
-	}
 
-	else t := ObjGetCapacity([var], 1) != "" ? "String"
-	       :  InStr(var, ".") ? "Float" : "Integer"
+	else
+		t := ObjGetCapacity([v], 1) != "" ? "String" : (InStr(v, ".") ? "Float" : "Integer")
 	
 	return assert ? InStr(t, assert) : t
 }
