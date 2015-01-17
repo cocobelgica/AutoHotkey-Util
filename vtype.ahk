@@ -8,12 +8,12 @@ vtype(v, assert:="")
 		t := %Type%(v) ;// use v2.0-a built-in Type()
 
 	else if IsObject(v)
-		t := ObjGetCapacity(v) != ""        ? "Object"
-		  :  IsFunc(v)                      ? "Func"
-		  :  ComObjType(v) != ""            ? "ComObject"
-		  :  NumGet(&v) == NumGet(&RgxObj)  ? "RegExMatchObject"
-		  :  IsFunc(v.get) || IsFunc(v.set) ? "Property"
-		  :                                   "FileObject"
+		t := ObjGetCapacity(v) != ""                        ? "Object"
+		  :  IsFunc(v)                                      ? "Func"
+		  :  ComObjType(v) != ""                            ? "ComObject"
+		  :  NumGet(&v) == NumGet(&RgxObj)                  ? "RegExMatchObject"
+		  :  NumGet(&v) == NumGet(&(f:=FileOpen("*", "w"))) ? "FileObject"
+		  :                                                   "Property"
 
 	else
 		t := ObjGetCapacity([v], 1) != "" ? "String" : (InStr(v, ".") ? "Float" : "Integer")
