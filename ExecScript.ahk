@@ -71,21 +71,18 @@ ExecScript(script, args:="", kwargs*)
 			"Ptr",  0                    ; nDefaultTimeOut
 			"Ptr",  0                    ; lpSecurityAttributes
 		)) ) == -1) ; INVALID_HANDLE_VALUE
-			throw A_ThisFunc . "() - Failed to create named pipe.`nA_LastError: " . A_LastError
+			throw Exception("ExecScript() - Failed to create named pipe", -1, A_LastError)
 	}
 
+	; Command = {ahk_exe} /ErrorStdOut /CP{codepage} {file}
 	static fso := ComObjCreate("Scripting.FileSystemObject")
-	static q := Chr(34) ;// double quote("), for v1.1 and v2.0-a compatibility
-	; AutoHotkey.exe
-	cmd := q . fso.GetAbsolutePathName(ahk) . q . " /ErrorStdOut /"
-	; /CPn switch
-	    .  ( cp ~= "i)^(CP)?\d+$" ? (Abs(cp) != "" ? "CP" . cp : cp)
-	       : cp =  "UTF-8"        ? "CP65001"
-	       : cp =  "UTF-16"       ? "CP1200"
-	       : cp := "CP0" ) . " "
-	; Target = pipe|script file|stdin(*)
-	    .  q . (pipe ? "\\.\pipe\" . name : (run_file ? script : "*")) . q
-	; Parameters to pass to the script
+	static q := Chr(34) ;// quotes("), for v1.1 and v2.0-a compatibility
+	cmd := Format("{4}{1}{4} /ErrorStdOut /CP{2} {4}{3}{4}"
+	    , fso.GetAbsolutePathName(ahk)
+	    , cp="UTF-8" ? 65001 : cp="UTF-16" ? 1200 : cp := Round(LTrim(cp, "CPcp"))
+	    , pipe ? "\\.\pipe\" . name : run_file ? script : "*", q)
+	
+	; Process and append parameters to pass to the script
 	for each, arg in args
 	{
 		i := 0
