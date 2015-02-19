@@ -1,6 +1,8 @@
 /* Function: OnWin
  *     Specifies a function to call when the specified window event for the
  *     specified window occurs.
+ * Version:
+ *     v1.0.0.1
  * License:
  *     WTFPL [http://wtfpl.net/]
  * Requirments:
@@ -12,11 +14,19 @@
  *                     Show,Hide,Minimize,Maximize,Move,(Close|NotExist|!Exist)
  *                     and (NotActive|!Active) - values within parenthesis are
  *                     the same.
- *     WinTitle [in] - see http://ahkscript.org/docs/misc/WinTitle.htm
+ *     WinTitle [in] - see http://ahkscript.org/docs/misc/WinTitle.htm. Window
+ *                     groups(ahk_group GroupName) is currently not supported.
  *     callback [in] - Function name, Func object or object. The callback will
  *                     receive an event object with the ff properties: 'Event'
- *                     and 'WinTitle', as its first argument. For now, monitoring
+ *                     and 'Window', as its first argument. For now, monitoring
  *                     is for one-time use only.
+ * Remarks:
+ *     - Script must be #Include-ed(manually or automatically) and must not be
+ *       copy-pasted into the main script.
+ *     - OnWin() uses A_TitleMatchMode and A_TitleMatchModeSpeed.
+ * Links:
+ *     GitHub      - http://goo.gl/JfzFTh
+ *     Forum Topic - http://goo.gl/sMufTt
  */
 OnWin(event, WinTitle, CbProc, reserved:=0)
 {
@@ -27,16 +37,19 @@ OnWin(event, WinTitle, CbProc, reserved:=0)
 
 	code := Format("
 	(LTrim Join`n
+	{5}
+	ListLines Off
 	OnWin_Main({1}{2}{1}, {1}{3}{1})
 	ExitApp
 	#Include {4}
 	#NoTrayIcon
-	)", Chr(34), host.Id, client.Id, A_LineFile)
+	#KeyHistory 0
+	)", Chr(34), host.Id, client.Id, A_LineFile, A_AhkVersion<"2" ? "SetBatchLines -1" : "")
 
-	cmd := Format("{1}{2}{1} /ErrorStdOut *", Chr(34), A_AhkPath)
+	cmd := Format("{1}{2}{1} *", Chr(34), A_AhkPath)
 	exec := ComObjCreate("WScript.Shell").Exec(cmd)
 	exec.StdIn.Write(code), exec.StdIn.Close()
-	while ObjHasKey(host.Clients, client.Id)
+	while ObjHasKey(host.Clients, client.Id) && (exec.Status == 0)
 		Sleep 10
 
 	; taken from Lexikos' LoadFile() [http://goo.gl/y6ctxp], make script #Persistent
@@ -89,13 +102,14 @@ class OnWinHost
 
 class OnWinClient
 {
-	__New(event, WinTitle, CbProc, TMM:="")
+	__New(event, WinTitle, CbProc)
 	{
-		this.Event     := event
-		this.Window    := WinTitle
-		this.Callback  := IsObject(CbProc) ? CbProc : Func(CbProc)
-		this.MatchMode := TMM=="" ? A_TitleMatchMode : TMM
-		this.Id        := "#" . &this
+		this.Event          := event
+		this.Window         := WinTitle
+		this.Callback       := IsObject(CbProc) ? CbProc : Func(CbProc)
+		this.MatchMode      := A_TitleMatchMode
+		this.MatchModeSpeed := A_TitleMatchModeSpeed
+		this.Id             := "#" . &this
 	}
 
 	__Call(callee, args*)
@@ -120,6 +134,7 @@ OnWin_Main(HostId, ClientId)
 	DetectHiddenWindows On
 	SetWinDelay -1
 	SetTitleMatchMode % client.MatchMode
+	SetTitleMatchMode % client.MatchModeSpeed
 
 	event := client.Event
 	WinTitle := client.Window
