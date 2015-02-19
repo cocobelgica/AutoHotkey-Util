@@ -2,7 +2,7 @@
  *     Specifies a function to call when the specified window event for the
  *     specified window occurs.
  * Version:
- *     v1.0.0.1
+ *     v1.0.01.0
  * License:
  *     WTFPL [http://wtfpl.net/]
  * Requirments:
@@ -14,8 +14,10 @@
  *                     Show,Hide,Minimize,Maximize,Move,(Close|NotExist|!Exist)
  *                     and (NotActive|!Active) - values within parenthesis are
  *                     the same.
- *     WinTitle [in] - see http://ahkscript.org/docs/misc/WinTitle.htm. Window
- *                     groups(ahk_group GroupName) is currently not supported.
+ *     WinTitle [in] - see http://ahkscript.org/docs/misc/WinTitle.htm. Due to
+ *                     limitations, 'ahk_group GroupName' is not supported
+ *                     directly. To specify a window group, pass an array of
+ *                     WinTitle(s) instead.
  *     callback [in] - Function name, Func object or object. The callback will
  *                     receive an event object with the ff properties: 'Event'
  *                     and 'Window', as its first argument. For now, monitoring
@@ -104,6 +106,9 @@ class OnWinClient
 {
 	__New(event, WinTitle, CbProc)
 	{
+		if (WinTitle ~= "i)^ahk_group .*$")
+			throw Exception("Invalid argument. To specify a window group, pass an array of WinTitle(s).", -1, WinTitle)
+		
 		this.Event          := event
 		this.Window         := WinTitle
 		this.Callback       := IsObject(CbProc) ? CbProc : Func(CbProc)
@@ -137,19 +142,24 @@ OnWin_Main(HostId, ClientId)
 	SetTitleMatchMode % client.MatchModeSpeed
 
 	event := client.Event
-	WinTitle := client.Window
+	if IsObject(WinTitle := client.Window) ; ahk_group GroupName workaround
+	{
+		Loop % WinTitle[A_AhkVersion<"2" ? "MaxIndex" : "Length"]() ; can't use for-loop :(
+			GroupAdd WinGroup, % WinTitle[A_Index]
+		WinTitle := "ahk_group WinGroup"
+	}
 
 	if !InStr(",Close,NotExist,!Exist,", "," . event . ",")
 		WinWait %WinTitle%
 
 	if (event = "Active")
-		WinWaitActive
+		WinWaitActive %WinTitle%
 
 	else if (event = "NotActive" || event = "!Active")
-		WinWaitNotActive
+		WinWaitNotActive %WinTitle%
 
 	else if InStr(",Close,NotExist,!Exist,", "," . event . ",")
-		WinWaitClose %WinTitle% ; not set LastFound above
+		WinWaitClose %WinTitle%
 
 	else if (event = "Show" || event = "Hide")
 	{
@@ -171,7 +181,7 @@ OnWin_Main(HostId, ClientId)
 
 	else if (event = "Move")
 	{
-		WinGetPos prevX, prevY, prevW, prevH
+		WinGetPos prevX, prevY, prevW, prevH ; use last found (for ahk_group WinGroup)
 		Loop
 			WinGetPos x, y, w, h
 		until (x != prevX || y != prevY || w != prevW || h != prevH)
