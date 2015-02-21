@@ -2,7 +2,7 @@
  *     Specifies a function to call when the specified window event for the
  *     specified window occurs.
  * Version:
- *     v1.0.01.02
+ *     v1.0.02.00
  * License:
  *     WTFPL [http://wtfpl.net/]
  * Requirments:
@@ -10,10 +10,9 @@
  * Syntax:
  *     OnWin( event, WinTitle, callback )
  * Parameters:
- *     event    [in] - Window event to monitor. Valid values are: Exist,Active,
- *                     Show,Hide,Minimize,Maximize,Move,(Close|NotExist|!Exist)
- *                     and (NotActive|!Active) - values within parenthesis are
- *                     the same.
+ *     event    [in] - Window event to monitor. Valid values are: Exist, Active,
+ *                     NotActive/!Active, Show, Hide, Minimize, Maximize, Move,
+ *                     Close/NotExist/!Exist and CloseAll/NotExistAll/!ExistAll.
  *     WinTitle [in] - see http://ahkscript.org/docs/misc/WinTitle.htm. Due to
  *                     limitations, 'ahk_group GroupName' is not supported
  *                     directly. To specify a window group, pass an array of
@@ -132,7 +131,7 @@ OnWin_Main(HostId, ClientId)
 	host := ComObjActive(HostId), client := host.GetClient(ClientId)
 
 	event := client.Event
-	if !(event ~= "i)^((Not|!)?Exist|(Not|!)?Active|Close|Show|Hide|M(in|ax)imize|Move)$")
+	if !(event ~= "i)^(Exist|(Not|!)?Active|(Close|(Not|!)Exist)(All)?|Show|Hide|M(in|ax)imize|Move)$")
 		return
 
 	static HostWnd
@@ -152,7 +151,7 @@ OnWin_Main(HostId, ClientId)
 		WinTitle := "ahk_group WinGroup"
 	}
 
-	if !InStr(",Close,NotExist,!Exist,", "," . event . ",")
+	if InStr(" Exist Show Minimize Maximize Move ", Format(" {} ", event))
 		WinWait %WinTitle%
 
 	if (event = "Active")
@@ -161,10 +160,10 @@ OnWin_Main(HostId, ClientId)
 	else if (event = "NotActive" || event = "!Active")
 		WinWaitNotActive %WinTitle%
 
-	else if InStr(",Close,NotExist,!Exist,", "," . event . ",")
-		WinWaitClose %WinTitle%
+	else if (event ~= "i)^(Close|(Not|!)Exist)(All)?$") && WinExist(WinTitle)
+		WinWaitClose % InStr(event, "All") ? WinTitle : ""
 
-	else if (event = "Show" || event = "Hide")
+	else if (event = "Show") || (event = "Hide" && WinExist(WinTitle))
 	{
 		DetectHiddenWindows Off
 		if (event = "Show")
@@ -173,7 +172,7 @@ OnWin_Main(HostId, ClientId)
 			WinWaitClose
 	}
 
-	else if InStr(",Minimize,Maximize,", "," . event . ",")
+	else if (event = "Minimize" || event = "Maximize")
 	{
 		hWnd := WinExist() ; get handle of "Last Found" Window
 		showCmd := event="Minimize" ? 2 : 3
