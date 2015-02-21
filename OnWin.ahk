@@ -2,7 +2,7 @@
  *     Specifies a function to call when the specified window event for the
  *     specified window occurs.
  * Version:
- *     v1.0.01.0
+ *     v1.0.01.01
  * License:
  *     WTFPL [http://wtfpl.net/]
  * Requirments:
@@ -48,7 +48,7 @@ OnWin(event, WinTitle, CbProc, reserved:=0)
 	#KeyHistory 0
 	)", Chr(34), host.Id, client.Id, A_LineFile, A_AhkVersion<"2" ? "SetBatchLines -1" : "")
 
-	cmd := Format("{1}{2}{1} *", Chr(34), A_AhkPath)
+	cmd := Format("{1}{2}{1} /ErrorStdOut *", Chr(34), A_AhkPath)
 	exec := ComObjCreate("WScript.Shell").Exec(cmd)
 	exec.StdIn.Write(code), exec.StdIn.Close()
 	while ObjHasKey(host.Clients, client.Id) && (exec.Status == 0)
