@@ -167,8 +167,10 @@ OnWin_Main(HostId, ClientId)
 	else if (event = "Show" || event = "Hide")
 	{
 		DetectHiddenWindows Off
-		while (event="Show" ? !WinExist() : WinExist())
-			Sleep 10
+		if (event = "Show")
+			WinWait %WinTitle%
+		else
+			WinWaitClose
 	}
 
 	else if InStr(",Minimize,Maximize,", "," . event . ",")
