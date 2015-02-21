@@ -2,7 +2,7 @@
  *     Specifies a function to call when the specified window event for the
  *     specified window occurs.
  * Version:
- *     v1.0.01.01
+ *     v1.0.01.02
  * License:
  *     WTFPL [http://wtfpl.net/]
  * Requirments:
@@ -131,6 +131,10 @@ OnWin_Main(HostId, ClientId)
 {
 	host := ComObjActive(HostId), client := host.GetClient(ClientId)
 
+	event := client.Event
+	if !(event ~= "i)^((Not|!)?Exist|(Not|!)?Active|Close|Show|Hide|M(in|ax)imize|Move)$")
+		return
+
 	static HostWnd
 	HostWnd := host.Window
 	SetTimer _onwin_checkhost, 20
@@ -141,7 +145,6 @@ OnWin_Main(HostId, ClientId)
 	SetTitleMatchMode % client.MatchMode
 	SetTitleMatchMode % client.MatchModeSpeed
 
-	event := client.Event
 	if IsObject(WinTitle := client.Window) ; ahk_group GroupName workaround
 	{
 		Loop % WinTitle[A_AhkVersion<"2" ? "MaxIndex" : "Length"]() ; can't use for-loop :(
@@ -186,9 +189,6 @@ OnWin_Main(HostId, ClientId)
 			WinGetPos x, y, w, h
 		until (x != prevX || y != prevY || w != prevW || h != prevH)
 	}
-
-	else if (event != "Exist") ; unsupported event type
-		return
 
 	DetectHiddenWindows %prev_DHW%
 	
