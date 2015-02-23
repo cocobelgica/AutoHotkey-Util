@@ -2,7 +2,7 @@
  *     Specifies a function to call when the specified window event for the
  *     specified window occurs.
  * Version:
- *     v1.0.02.00
+ *     v1.0.03.00
  * License:
  *     WTFPL [http://wtfpl.net/]
  * Requirments:
@@ -50,7 +50,7 @@ OnWin(event, WinTitle, CbProc, reserved:=0)
 	cmd := Format("{1}{2}{1} /ErrorStdOut *", Chr(34), A_AhkPath)
 	exec := ComObjCreate("WScript.Shell").Exec(cmd)
 	exec.StdIn.Write(code), exec.StdIn.Close()
-	while ObjHasKey(host.Clients, client.Id) && (exec.Status == 0)
+	while !client.__Handle && (exec.Status == 0)
 		Sleep 10
 
 	; taken from Lexikos' LoadFile() [http://goo.gl/y6ctxp], make script #Persistent
@@ -63,30 +63,31 @@ class OnWinHost
 {
 	__New()
 	{
-		this.Clients := {}, this.Window := A_ScriptHwnd + 0
+		this.Clients := {}
 
-		; Register host instance as active object
+		proxy := ObjClone(this)
 		VarSetCapacity(CLSID, 16, 0)
 		if DllCall("ole32\CoCreateGuid", "Ptr", &CLSID) != 0
 			throw Exception("Failed to generate CLSID", -1)
 
 		HR := DllCall("oleaut32\RegisterActiveObject"
-		      , "Ptr", &this, "Ptr", &CLSID, "UInt", 0, "UInt*", hReg, "UInt")
+		      , "Ptr", &proxy, "Ptr", &CLSID, "UInt", 0, "UInt*", hReg, "UInt")
 		if (HR < 0)
-			throw Exception(Format("HRESULT: 0x{:x}", hr), -1)
-		this.__Handle := hReg
+			throw Exception(Format("HRESULT: 0x{:x}", HR), -1)
+		this.__Handle := hReg, proxy.__Handle := 0 ; avoid calling RevokeActiveObject twice
 
 		VarSetCapacity(sGUID, 38 * 2 + 1)
 		DllCall("ole32\StringFromGUID2", "Ptr", &CLSID, "Ptr", &sGUID, "Int", 38 + 1)
 		this.Id := StrGet(&sGUID, "UTF-16")
 	}
 
-	__Delete()
+	__Delete() ; called on script's exit
 	{
-		if hReg := this.__Handle
+		if hReg := this.__Handle ; 0 if proxy(active object)
 		{
-			this.__Handle := 0
-			return DllCall("oleaut32\RevokeActiveObject", "UInt", hReg, "Ptr", 0)
+			DllCall("oleaut32\RevokeActiveObject", "UInt", hReg, "Ptr", 0)
+			for i, client in ObjRemove(this, "Clients") ; terminate any running listener(s)
+				client.Terminate()
 		}
 	}
 
@@ -95,9 +96,9 @@ class OnWinHost
 		this.Clients[ client.Id ] := client
 	}
 
-	GetClient(id)
+	FreeClient(client)
 	{
-		return ObjRemove(this.Clients, id)
+		return ObjRemove(this.Clients, client.Id)
 	}
 }
 
@@ -114,6 +115,7 @@ class OnWinClient
 		this.MatchMode      := A_TitleMatchMode
 		this.MatchModeSpeed := A_TitleMatchModeSpeed
 		this.Id             := "#" . &this
+		this.__Handle       := 0
 	}
 
 	__Call(callee, args*)
@@ -124,19 +126,22 @@ class OnWinClient
 				return %CbProc%(this)
 		}
 	}
+
+	Terminate()
+	{
+		if hWnd := this.__Handle
+			return DllCall("PostMessage", "Ptr", hWnd, "UInt", 0x10, "Ptr", 0, "Ptr", 0) ; WM_CLOSE
+	}
 }
 
 OnWin_Main(HostId, ClientId)
 {
-	host := ComObjActive(HostId), client := host.GetClient(ClientId)
+	host := ComObjActive(HostId)
+	client := host.Clients[ClientId], client.__Handle := A_ScriptHwnd + 0
 
 	event := client.Event
 	if !(event ~= "i)^(Exist|(Not|!)?Active|(Close|(Not|!)Exist)(All)?|Show|Hide|M(in|ax)imize|Move)$")
 		return
-
-	static HostWnd
-	HostWnd := host.Window
-	SetTimer _onwin_checkhost, 20
 
 	prev_DHW := A_DetectHiddenWindows
 	DetectHiddenWindows On
@@ -193,10 +198,6 @@ OnWin_Main(HostId, ClientId)
 
 	DetectHiddenWindows %prev_DHW%
 	
-	return %client%()
-
-_onwin_checkhost:
-	if !DllCall("IsWindow", "Ptr", HostWnd)
-		ExitApp 2
-	return
+	try %client%() ; suppress error
+	return host.FreeClient(client)
 }
