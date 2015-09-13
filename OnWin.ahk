@@ -1,203 +1,366 @@
-/* Function: OnWin
+/**
+ * Function: OnWin
  *     Specifies a function to call when the specified window event for the
  *     specified window occurs.
  * Version:
- *     v1.0.03.00
+ *     v1.1.00.00-alpha
  * License:
  *     WTFPL [http://wtfpl.net/]
- * Requirments:
- *     AutoHotkey v1.1.17.00+ OR v2.0-a058
+ * Requirements:
+ *     Latest stable version of AutoHotkey
  * Syntax:
- *     OnWin( event, WinTitle, callback )
- * Parameters:
- *     event    [in] - Window event to monitor. Valid values are: Exist, Active,
- *                     NotActive/!Active, Show, Hide, Minimize, Maximize, Move,
- *                     Close/NotExist/!Exist and CloseAll/NotExistAll/!ExistAll.
- *     WinTitle [in] - see http://ahkscript.org/docs/misc/WinTitle.htm. Due to
- *                     limitations, 'ahk_group GroupName' is not supported
- *                     directly. To specify a window group, pass an array of
- *                     WinTitle(s) instead.
- *     callback [in] - Function name, Func object or object. The callback will
- *                     receive an event object with the ff properties: 'Event'
- *                     and 'Window', as its first argument. For now, monitoring
- *                     is for one-time use only.
+ *     OnWin( Event, WinTitle, Callback [, ItemId := "" ] )
+ * Parameter(s):
+ *     Event           [in] - Window event to monitor. Valid values are: Exist,
+ *                            Close, Show, Hide, Active, NotActive, Minimize,
+ *                            Maximize.
+ *     WinTitle        [in] - see http://ahkscript.org/docs/misc/WinTitle.htm
+ *     Callback        [in] - "Function object" - see http://ahkscript.org/docs/objects/Functor.htm
+ *     ItemId     [in, opt] - User-defined ID to associate with this particular
+ *                            window event monitor.
  * Remarks:
  *     - Script must be #Include-ed(manually or automatically) and must not be
  *       copy-pasted into the main script.
- *     - OnWin() uses A_TitleMatchMode and A_TitleMatchModeSpeed.
+ *     - OnWin() uses A_TitleMatchMode
  * Links:
  *     GitHub      - http://goo.gl/JfzFTh
  *     Forum Topic - http://goo.gl/sMufTt
  */
-OnWin(event, WinTitle, CbProc, reserved:=0)
+OnWin(args*)
 {
-	static host
-	if !IsObject(host)
-		host := new OnWinHost()
-	host.AddClient(client := new OnWinClient(event, WinTitle, CbProc))
-
-	code := Format("
-	(LTrim Join`n
-	{5}
-	ListLines Off
-	OnWin_Main({1}{2}{1}, {1}{3}{1})
-	ExitApp
-	#Include {4}
-	#NoTrayIcon
-	#KeyHistory 0
-	)", Chr(34), host.Id, client.Id, A_LineFile, A_AhkVersion<"2" ? "SetBatchLines -1" : "")
-
-	cmd := Format("{1}{2}{1} /ErrorStdOut *", Chr(34), A_AhkPath)
-	exec := ComObjCreate("WScript.Shell").Exec(cmd)
-	exec.StdIn.Write(code), exec.StdIn.Close()
-	while !client.__Handle && (exec.Status == 0)
-		Sleep 10
-
-	; taken from Lexikos' LoadFile() [http://goo.gl/y6ctxp], make script #Persistent
-	Hotkey IfWinActive, % host.Id
-	Hotkey vk07, _onwin_persistent, Off
-_onwin_persistent:
+	return __OnWinEvent(args*)
+}
+/**
+ * Function: OnWin_Ex
+ *     Sames as OnWin() above, however, a child process is spawned to perform the
+ *     monitoring.
+ * Syntax:
+ *     OnWin_Ex( Event, WinTitle, Callback [, ItemId := "", ProcessName := "default" ] )
+ * Parameter(s):
+ *     Event             [in] - Same as that of OnWin()'s
+ *     WinTitle          [in] - Same as that of OnWin()'s
+ *     Callback          [in] - Same as that of OnWin()'s
+ *     ItemId       [in, opt] - Same as that of OnWin()'s
+ *     ProcessName  [in, opt] - User-defined ID to associate with this particular
+ *                              child process. Subsequent call(s) to OnWin_Ex()
+ *                              will push the window event monitor info into the
+ *                              queue of this particular process unless a different
+ *                              name/ID is specified.
+ */
+OnWin_Ex(args*)
+{
+	return __OnWinEvent(args*)
+}
+/**
+ * Function: OnWin_Stop
+ *     Disables monitoring for the particular window event monitor info item
+ *     specified by the 'ItemId' parameter.
+ * Syntax:
+ *     OnWin_Stop( ItemId [, ProcessName ] )
+ * Parameter(s):
+ *     ItemId            [in] - a previously defined ItemId - see OnWin/OnWin_Ex
+ *                              If explicitly blank(""), all window event monitor
+ *                              are disabled.
+ *     ProcessName  [in, opt] - a previously defined ProcessName - see OnWin_Ex
+ */
+OnWin_Stop(id, name*)
+{
+	return __OnWinEvent(id, name*)
 }
 
-class OnWinHost
+; PRIVATE
+__OnWinEvent(args*)
 {
-	__New()
+	static InProcess   := new __OnWinEvent.Watcher
+	static SubProcesss := new __OnWinEvent.Server
+
+	static level := A_AhkVersion<"2" ? -2 : -1
+	command := Exception("", level).What ; prevent user from calling A_ThisFunc directly, overkill??
+	if (command == "OnWin")
+		return %InProcess%(args*)
+
+	else if (command == "OnWin_Ex")
+		return %SubProcesss%(args*)
+
+	else if (command == "OnWin_Stop")
 	{
-		this.Clients := {}
-
-		proxy := ObjClone(this)
-		VarSetCapacity(CLSID, 16, 0)
-		if DllCall("ole32\CoCreateGuid", "Ptr", &CLSID) != 0
-			throw Exception("Failed to generate CLSID", -1)
-
-		HR := DllCall("oleaut32\RegisterActiveObject"
-		      , "Ptr", &proxy, "Ptr", &CLSID, "UInt", 0, "UInt*", hReg, "UInt")
-		if (HR < 0)
-			throw Exception(Format("HRESULT: 0x{:x}", HR), -1)
-		this.__Handle := hReg, proxy.__Handle := 0 ; avoid calling RevokeActiveObject twice
-
-		VarSetCapacity(sGUID, 38 * 2 + 1)
-		DllCall("ole32\StringFromGUID2", "Ptr", &CLSID, "Ptr", &sGUID, "Int", 38 + 1)
-		this.Id := StrGet(&sGUID, "UTF-16")
-	}
-
-	__Delete() ; called on script's exit
-	{
-		if hReg := this.__Handle ; 0 if proxy(active object)
-		{
-			DllCall("oleaut32\RevokeActiveObject", "UInt", hReg, "Ptr", 0)
-			for i, client in ObjRemove(this, "Clients") ; terminate any running listener(s)
-				client.Terminate()
-		}
-	}
-
-	AddClient(client)
-	{
-		this.Clients[ client.Id ] := client
-	}
-
-	FreeClient(client)
-	{
-		return ObjRemove(this.Clients, client.Id)
-	}
-}
-
-class OnWinClient
-{
-	__New(event, WinTitle, CbProc)
-	{
-		if (WinTitle ~= "i)^ahk_group .*$")
-			throw Exception("Invalid argument. To specify a window group, pass an array of WinTitle(s).", -1, WinTitle)
-		
-		this.Event          := event
-		this.Window         := WinTitle
-		this.Callback       := IsObject(CbProc) ? CbProc : Func(CbProc)
-		this.MatchMode      := A_TitleMatchMode
-		this.MatchModeSpeed := A_TitleMatchModeSpeed
-		this.Id             := "#" . &this
-		this.__Handle       := 0
-	}
-
-	__Call(callee, args*)
-	{
-		if (callee == "") || (callee = "Call") || IsObject(callee)
-		{
-			if CbProc := this.Callback
-				return %CbProc%(this)
-		}
-	}
-
-	Terminate()
-	{
-		if hWnd := this.__Handle
-			return DllCall("PostMessage", "Ptr", hWnd, "UInt", 0x10, "Ptr", 0, "Ptr", 0) ; WM_CLOSE
-	}
-}
-
-OnWin_Main(HostId, ClientId)
-{
-	host := ComObjActive(HostId)
-	client := host.Clients[ClientId], client.__Handle := A_ScriptHwnd + 0
-
-	event := client.Event
-	if !(event ~= "i)^(Exist|(Not|!)?Active|(Close|(Not|!)Exist)(All)?|Show|Hide|M(in|ax)imize|Move)$")
-		return
-
-	prev_DHW := A_DetectHiddenWindows
-	DetectHiddenWindows On
-	SetWinDelay -1
-	SetTitleMatchMode % client.MatchMode
-	SetTitleMatchMode % client.MatchModeSpeed
-
-	if IsObject(WinTitle := client.Window) ; ahk_group GroupName workaround
-	{
-		Loop % WinTitle[A_AhkVersion<"2" ? "MaxIndex" : "Length"]() ; can't use for-loop :(
-			GroupAdd WinGroup, % WinTitle[A_Index]
-		WinTitle := "ahk_group WinGroup"
-	}
-
-	if InStr(" Exist Show Minimize Maximize Move ", Format(" {} ", event))
-		WinWait %WinTitle%
-
-	if (event = "Active")
-		WinWaitActive %WinTitle%
-
-	else if (event = "NotActive" || event = "!Active")
-		WinWaitNotActive %WinTitle%
-
-	else if (event ~= "i)^(Close|(Not|!)Exist)(All)?$") && WinExist(WinTitle)
-		WinWaitClose % InStr(event, "All") ? WinTitle : ""
-
-	else if (event = "Show") || (event = "Hide" && WinExist(WinTitle))
-	{
-		DetectHiddenWindows Off
-		if (event = "Show")
-			WinWait %WinTitle%
+		if ObjHasKey(args, 2)
+			SubProcesss.Clients[args[2]].Stop(args[1])
 		else
-			WinWaitClose
+			InProcess.Stop(args[1])
 	}
+}
 
-	else if (event = "Minimize" || event = "Maximize")
+class __OnWinEvent ; namespace
+{
+	class Callable ; base object for custom "Function" objects
 	{
-		hWnd := WinExist() ; get handle of "Last Found" Window
-		showCmd := event="Minimize" ? 2 : 3
-		VarSetCapacity(WINDOWPLACEMENT, 44, 0)
-		NumPut(44, WINDOWPLACEMENT, 0, "UInt") ; sizeof(WINDOWPLACEMENT)
-		Loop
-			DllCall("GetWindowPlacement", "Ptr", hWnd, "Ptr", &WINDOWPLACEMENT)
-		until NumGet(WINDOWPLACEMENT, 8, "UInt") == showCmd
+		__Call(method, args*)
+		{
+			if IsObject(method) || (method == "")
+				return method ? this.Call(method, args*) : this.Call(args*)
+		}
 	}
-
-	else if (event = "Move")
-	{
-		WinGetPos prevX, prevY, prevW, prevH ; use last found (for ahk_group WinGroup)
-		Loop
-			WinGetPos x, y, w, h
-		until (x != prevX || y != prevY || w != prevW || h != prevH)
-	}
-
-	DetectHiddenWindows %prev_DHW%
 	
-	try %client%() ; suppress error
-	return host.FreeClient(client)
+	class Watcher extends __OnWinEvent.Callable
+	{
+		Queue := []
+		IsRunning := false
+		Call(args*)
+		{
+			ObjPush(this.Queue, info := new __OnWinEvent.Info(args*))
+			
+			if !this.IsRunning
+				this.Start()
+		}
+
+		Watch()
+		{
+			Loop, % ObjLength(this.Queue)
+			{
+				if this.Queue[1].Assert()
+					ObjRemoveAt(this.Queue, 1)
+				else
+					ObjPush(this.Queue, ObjRemoveAt(this.Queue, 1))
+			}
+
+			if !this.IsRunning := ObjLength(this.Queue) ; update 'IsRunning' property
+				this.Stop()
+		}
+
+		Start()
+		{
+			this.SetTimer(25)
+			this.IsRunning := true
+		}
+
+		Stop(args*)
+		{
+			this.SetTimer("Off")
+
+			if HasId := ObjLength(args)
+			{
+				id := args[1]
+				if (id == "") && (len := ObjLength(this.Queue))
+					ObjRemoveAt(this.Queue, 1, len)
+
+				Loop, % ObjLength(this.Queue)
+					if (this.Queue[A_Index].Id = id) ? ObjRemoveAt(this.Queue, A_Index) : 0
+						break
+			}
+
+			this.SetTimer(HasId ? "On" : "Delete")
+		}
+
+		SetTimer(arg3)
+		{
+			static number := "number"
+			if arg3 is %number%
+			{
+				if !timer := this.Timer
+					timer := this.Timer := ObjBindMethod(this, "Watch")
+				SetTimer, %timer%, %arg3%
+			}
+			
+			else if (arg3 = "On" || arg3 = "Off")
+			{
+				timer := this.Timer
+				SetTimer, %timer%, %arg3%
+			}
+			
+			else if (arg3 = "Delete")
+			{
+				if timer := ObjDelete(this, "Timer")
+					SetTimer, %timer%, Delete
+			}
+		}
+	}
+
+	class WatcherEx extends __OnWinEvent.Watcher
+	{
+		Host := "" ; value assigned by host
+		Name := "" ; value assigned by host
+		__Delete()
+		{
+			ExitApp
+		}
+
+		Stop(args*)
+		{
+			base.Stop(args*)
+			
+			if !ObjLength(args) ; usually called from the timer routine when the queue is empty
+			{
+				; there are no longer any window events to monitor. Remove object
+				; reference from the host script's clients list, __Delete should be
+				; triggered automatically.
+				this.Host.Ptr.Clients.Delete(this.Name)
+				this.Host := ""
+			}
+		}
+	}
+
+	class Server extends __OnWinEvent.Callable
+	{
+		Clients := {}
+		Call(event, WinTitle, CbProc, id:="", name:="default")
+		{
+			if !IsObject(this.Clients[name])
+			{
+				client := new __OnWinEvent.Client
+
+				static q := Chr(34), quot := Func("Format").Bind("{1}{2}{1}", q)
+				code := Format("
+				( LTrim Join`r`n Comments
+				ComObjActive({1}).Proxy := new __OnWinEvent.WatcherEx
+				return
+				#NoTrayIcon
+				#Persistent
+				#Include {2}
+				)"
+				, quot.Call(client.Guid["Str"]), A_LineFile)
+
+				try
+				{
+					WshExec := ComObjCreate("WScript.Shell").Exec(quot.Call(A_AhkPath) . " /ErrorStdOut *")
+					WshExec.StdIn.Write(code)
+					WshExec.StdIn.Close()
+					while (WshExec.Status == 0) && !client.Proxy
+						Sleep, 10
+				}
+				finally
+					client.Revoke()
+
+				client.Proxy.Host := new this.Ref(this) ; weak reference, allows 2-way communication
+				client.Proxy.Name := name
+				this.Clients[name] := client.Proxy
+				client := ""
+			}
+
+			remote := this.Clients[name]
+			return %remote%(event, WinTitle, CbProc, id, A_TitleMatchMode)
+		}
+
+		class Ref
+		{
+			__New(self)
+			{
+				this.__Ptr := &self
+			}
+
+			Ptr[] ; allows client script(s) to retrieve a reference to the host object
+			{
+				get {
+					if (pThis := this.__Ptr) && (NumGet(pThis + 0) == NumGet(&this))
+						return Object(pThis)
+				}
+			}
+		}
+
+		__Delete() ; triggers on main script's exit
+		{
+			; stop remote client script(s) if any
+			for i, client in this.Clients
+				client.SetTimer("Delete") ; force stop and remove any extra object references(timer's BoundFunc)
+			this.Clients := "" ; should trigger client script(s) __Delete
+		}
+	}
+
+	class Client
+	{
+		__New()
+		{
+			HR := DllCall("oleaut32\RegisterActiveObject", "Ptr", &this, "Ptr", this.Guid["Ptr"], "UInt", 0, "UInt*", hReg, "UInt")
+			if (HR < 0)
+				throw Exception("RegisterActiveObject() error", -1, Format("HRESULT: 0x{:x}", HR))
+			this.__Handle := hReg
+		}
+
+		__Delete()
+		{
+			this.Revoke()
+		}
+
+		Revoke()
+		{
+			if hReg := this.__Handle
+				DllCall("oleaut32\RevokeActiveObject", "UInt", hReg, "Ptr", 0)
+			this.__Handle := 0
+		}
+
+		Guid[arg]
+		{
+			get {
+				if !pGuid := ObjGetAddress(this, "_Guid")
+				{
+					ObjSetCapacity(this, "_Guid", 94)
+					pGuid := ObjGetAddress(this, "_Guid")
+					if ( DllCall("ole32\CoCreateGuid", "Ptr", pGuid) != 0 )
+						throw Exception("Failed to create GUID", -1, Format("<at {1:p}>", pGuid))
+					DllCall("ole32\StringFromGUID2", "Ptr", pGuid, "Ptr", pGuid + 16, "Int", 39)
+				}
+				return (arg="Ptr") ? pGuid : (arg="Str") ? StrGet(pGuid + 16, "UTF-16") : ""
+			}
+		}
+	}
+
+	class Info
+	{
+		__New(event, WinTitle, CbProc, id:="", tmm:=0) ; tmm used internally for client scripts
+		{
+			this.Event := event
+			this.WinTitle := WinTitle
+			this.Callback := CbProc
+			this.TitleMatchMode := tmm ? tmm : A_TitleMatchMode
+			if (id != "")
+				this.Id := id
+		}
+
+		Assert()
+		{
+			event := this.Event
+			WinTitle := this.WinTitle
+			prev_TMM := A_TitleMatchMode
+			this_TMM := this.TitleMatchMode
+				SetTitleMatchMode, %this_TMM%
+
+			prev_DWH := A_DetectHiddenWindows
+			DetectHiddenWindows, On
+
+			if (event = "Exist") || (event = "Close" && WinExist(WinTitle))
+				r := (event="Exist") ? WinExist(WinTitle) : !WinExist(WinTitle)
+
+			
+			else if (event = "Active") || (event = "NotActive")
+				r := event="Active" ? WinActive(WinTitle) : !WinActive(WinTitle)
+
+			
+			else if (event = "Show") || (event = "Hide" && hWnd := WinExist(WinTitle))
+			{
+				DetectHiddenWindows, Off
+				r := (event="Show") ? WinExist(WinTitle) : !WinExist(WinTitle)
+			}
+
+			
+			else if (event = "Minimize" || event = "Maximize")
+			{
+				static WINDOWPLACEMENT
+				if !VarSetCapacity(WINDOWPLACEMENT)
+					VarSetCapacity(WINDOWPLACEMENT, 44, 0), NumPut(44, WINDOWPLACEMENT, 0, "UInt") ; sizeof(WINDOWPLACEMENT)
+				
+				hWnd := WinExist(WinTitle)
+				showCmd := event="Minimize" ? 2 : 3
+				DllCall("GetWindowPlacement", "Ptr", hWnd, "Ptr", &WINDOWPLACEMENT)
+				r := NumGet(WINDOWPLACEMENT, 8, "UInt") == showCmd
+			}
+
+			
+			SetTitleMatchMode, %prev_TMM%
+			DetectHiddenWindows %prev_DHW%
+			
+			if r
+				this.Callback.Call(this)
+			return r
+		}
+	}
 }
