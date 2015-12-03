@@ -97,8 +97,10 @@ class __OnWinEvent ; namespace
 	{
 		__Call(method, args*)
 		{
-			if IsObject(method) || (method == "")
-				return method ? this.Call(method, args*) : this.Call(args*)
+			if IsObject(method)
+				return this.Call(method, args*)
+			else if (method == "")
+				return this.Call(args*)
 		}
 	}
 	
