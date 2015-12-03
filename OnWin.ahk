@@ -327,20 +327,23 @@ class __OnWinEvent ; namespace
 			prev_DWH := A_DetectHiddenWindows
 			DetectHiddenWindows, On
 
-			if (event = "Exist") || (event = "Close" && WinExist(WinTitle))
-				r := (event="Exist") ? WinExist(WinTitle) : !WinExist(WinTitle)
+			if (event = "Exist")
+				r := WinExist(WinTitle)
 
+			else if (event = "Close")
+				r := !WinExist(WinTitle)
 			
-			else if (event = "Active") || (event = "NotActive")
-				r := event="Active" ? WinActive(WinTitle) : !WinActive(WinTitle)
+			else if (event = "Active")
+				r := WinActive(WinTitle)
 
+			else if (event = "NotActive")
+				r := !WinActive(WinTitle)
 			
 			else if (event = "Show") || (event = "Hide" && hWnd := WinExist(WinTitle))
 			{
 				DetectHiddenWindows, Off
 				r := (event="Show") ? WinExist(WinTitle) : !WinExist(WinTitle)
 			}
-
 			
 			else if (event = "Minimize" || event = "Maximize")
 			{
