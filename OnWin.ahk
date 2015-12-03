@@ -3,7 +3,7 @@
  *     Specifies a function to call when the specified window event for the
  *     specified window occurs.
  * Version:
- *     v1.1.00.00-alpha
+ *     v1.1.00.02
  * License:
  *     WTFPL [http://wtfpl.net/]
  * Requirements:
