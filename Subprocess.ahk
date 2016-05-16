@@ -5,112 +5,72 @@ Subprocess_Run(args*)
 
 class Subprocess
 {
-	; implement as Functor to encapsulate helper functions
-	class __New extends Subprocess.Functor
+	__New(cmd, cwd:="")
 	{
-		; instance is passed as 'self'
-		Call(self, cmd, cwd:="", StartInfo:="") ; StartInfo=reserved
-		{
-			stdin := this.CreatePipe()
-				this.SetHandleInformation(stdin.read, 1, 1) ; HANDLE_FLAG_INHERIT
-			stdout := this.CreatePipe()
-				this.SetHandleInformation(stdout.write, 1, 1) ; HANDLE_FLAG_INHERIT
-			stderr := this.CreatePipe()
-				this.SetHandleInformation(stderr.write, 1, 1) ; HANDLE_FLAG_INHERIT
+		  DllCall("CreatePipe", "Ptr*", stdin_read, "Ptr*", stdin_write, "Ptr", 0, "UInt", 0)
+		, DllCall("SetHandleInformation", "Ptr", stdin_read, "UInt", 1, "UInt", 1)
+		, DllCall("CreatePipe", "Ptr*", stdout_read, "Ptr*", stdout_write, "Ptr", 0, "UInt", 0)
+		, DllCall("SetHandleInformation", "Ptr", stdout_write, "UInt", 1, "UInt", 1)
+		, DllCall("CreatePipe", "Ptr*", stderr_read, "Ptr*", stderr_write, "Ptr", 0, "UInt", 0)
+		, DllCall("SetHandleInformation", "Ptr", stderr_write, "UInt", 1, "UInt", 1)
 
-			if !(pStartupInfo := ObjGetAddress(this, "_STARTUPINFO")) {
-				sizeof_SI := A_PtrSize==8 ? 104 : 68 ; 40 + 7*A_PtrSize + 2*(pad := A_PtrSize==8 ? 4 : 0)
-				pStartupInfo := this.NewBuffer("_STARTUPINFO", sizeof_SI)
-					NumPut(sizeof_SI, pStartupInfo + 0, "UInt")
-					NumPut(0x100, pStartupInfo + (A_PtrSize==8 ? 60 : 44), "UInt") ; dwFlags=STARTF_USESTDHANDLES
-			}
-			
-			  NumPut(stderr.write
-			, NumPut(stdout.write
-			, NumPut(stdin.read, pStartupInfo + (A_PtrSize==8 ? 80 : 56))))
-
-			static sizeof_PI := 8 + 2*A_PtrSize
-			pProcessInfo := this.NewBuffer.Call(self, "PROCESS_INFORMATION", sizeof_PI)
-
-			; stringify arguments
-			if IsObject(cmd) {
-				static quot := Func("Format").Bind("{1}{2}{1}", Chr(34))
-				
-				len := ObjLength(args := cmd), cmd := ""
-				for i, arg in args
-					cmd .= (InStr(arg, " ") ? quot.Call(arg) : arg) . (i<len ? " " : "")
-			}
-
-			; create the process
-			if (!this.CreateProcess(cmd,,,,,, cwd=="" ? A_WorkingDir : cwd, pStartupInfo, pProcessInfo))
-				throw Exception("Failed to create process", -1, cmd)
-
-			self.StdIn  := new Subprocess.StreamWriter(stdin.write)
-			self.StdOut := new Subprocess.StreamReader(stdout.read)
-			self.StdErr := new Subprocess.StreamReader(stderr.read)
-
-			this.CloseHandle(stdin.read)
-			this.CloseHandle(stdout.write)
-			this.CloseHandle(stderr.write)
-
-			return self ; return instance
+		static _STARTUPINFO
+		if !VarSetCapacity(_STARTUPINFO) {
+			sizeof_si := A_PtrSize==8 ? 104 : 68 ; 40 + 7*A_PtrSize + 2*(pad := A_PtrSize==8 ? 4 : 0)
+			  VarSetCapacity(_STARTUPINFO, sizeof_si, 0)
+			, NumPut(sizeof_si, _STARTUPINFO, "UInt")
+			, NumPut(0x100, _STARTUPINFO, A_PtrSize==8 ? 60 : 44, "UInt") ; dwFlags=STARTF_USESTDHANDLES)
 		}
 
-		CreateProcess(CmdLine, ProcAttrib:=0, ThreadAttrib:=0, InheritHandles:=true, flags:=0x8000000, pEnv:=0, cwd:="", pStartupInfo:=0, pProcessInfo:=0)
-		{
-			return DllCall("CreateProcess", "Ptr", 0, "Str", CmdLine, "Ptr", ProcAttrib
-				, "Ptr", ThreadAttrib, "Int", InheritHandles, "UInt", flags, "Ptr", pEnv
-				, "Str", cwd, "Ptr", pStartupInfo, "Ptr", pProcessInfo)
+		  NumPut(stderr_write
+		, NumPut(stdout_write
+		, NumPut(stdin_read, _STARTUPINFO, A_PtrSize==8 ? 80 : 56)))
+
+		static sizeof_pi := 8 + 2*A_PtrSize
+		this.SetCapacity("PROCESS_INFORMATION", sizeof_pi)
+		proc_info := this.GetAddress("PROCESS_INFORMATION")
+
+		if IsObject(cmd) {
+			static quot := Func("Format").Bind("{1}{2}{1}", Chr(34))
+			length := cmd.Length(), args := cmd, cmd := ""
+			for i, arg in args
+				cmd .= (InStr(arg, " ") ? quot.Call(arg) : arg) . (i<length ? " " : "")
 		}
 
-		CreatePipe(PipeAttributes:=0, size:=0)
-		{
-			if !DllCall("CreatePipe", "Ptr*", hRead, "Ptr*", hWrite, "Ptr", PipeAttributes, "UInt", 0)
-				throw Exception("Failed to create anonymous pipe", -1, A_LastError)
-			
-			return { read: hRead, write: hWrite }
-		}
+		success := DllCall("CreateProcess", "Ptr", 0, "Str", cmd, "Ptr", 0
+			, "Ptr", 0, "Int", 1, "UInt", 0x8000000, "Ptr", 0, "Str", cwd=="" ? A_WorkingDir : cwd
+			, "Ptr", &_STARTUPINFO, "Ptr", proc_info)
+		if (!success)
+			throw Exception("Failed to create process.", -1, cmd)
 
-		SetHandleInformation(handle, mask, flags)
-		{
-			return DllCall("SetHandleInformation", "Ptr", handle, "UInt", mask, "UInt", flags)
-		}
+		this.StdIn  := new Subprocess.StreamWriter(stdin_write)
+		this.StdOut := new Subprocess.StreamReader(stdout_read)
+		this.StdErr := new Subprocess.StreamReader(stderr_read)
 
-		CloseHandle(handle)
-		{
-			return DllCall("CloseHandle", "Ptr", handle)
-		}
-
-		NewBuffer(key, length)
-		{
-			if !(addr := ObjGetAddress(this, key)) {
-				ObjSetCapacity(this, key, length)
-				addr := ObjGetAddress(this, key)
-					DllCall("RtlZeroMemory", "Ptr", addr, "UPtr", length)
-			}
-			return addr
-		}
+		  DllCall("CloseHandle", "Ptr", stdin_read)
+		, DllCall("CloseHandle", "Ptr", stdout_write)
+		, DllCall("CloseHandle", "Ptr", stderr_write)
 	}
 
 	__Delete()
 	{
-		pProcessInfo := ObjGetAddress(this, "PROCESS_INFORMATION")
-		DllCall("CloseHandle", "Ptr", NumGet(pProcessInfo + 0))         ; hProcess
-		DllCall("CloseHandle", "Ptr", NumGet(pProcessInfo + A_PtrSize)) ; hThread
+		proc_info := this.GetAddress("PROCESS_INFORMATION")
+		DllCall("CloseHandle", "Ptr", NumGet(proc_info + 0))         ; hProcess
+		DllCall("CloseHandle", "Ptr", NumGet(proc_info + A_PtrSize)) ; hThread
 	}
 
 	__Handle[] ; hProcess
 	{
 		get {
-			return NumGet(ObjGetAddress(this, "PROCESS_INFORMATION"))
+			return NumGet(this.GetAddress("PROCESS_INFORMATION"))
 		}
 	}
 
 	ProcessID[]
 	{
 		get {
-			pProcessInfo := ObjGetAddress(this, "PROCESS_INFORMATION")
-			return NumGet(pProcessInfo + 2*A_PtrSize, "UInt") ; dwProcessId
+			proc_info := this.GetAddress("PROCESS_INFORMATION")
+			return NumGet(proc_info + 2*A_PtrSize, "UInt") ; dwProcessId
 		}
 	}
 
@@ -124,42 +84,39 @@ class Subprocess
 	ExitCode[] ; STILL_ACTIVE=259
 	{
 		get {
-			hProcess := this.__Handle
-			if DllCall("GetExitCodeProcess", "Ptr", hProcess, "UInt*", ExitCode)
-				return ExitCode
+			if DllCall("GetExitCodeProcess", "Ptr", this.__Handle, "UInt*", exit_code)
+				return exit_code
 		}
 	}
 
-	Terminate(ExitCode:=0)
+	Terminate(exit_code:=0)
 	{
-		if (ExitCode == 259) ; STILL_ACTIVE
-			throw Exception("Exit code 'STILL_ACTIVE' is reserved", -1, ExitCode)
-		
-		; use gentler method - attempt to close window(s) first
-		prev_DHW := A_DetectHiddenWindows
-		DetectHiddenWindows, On
+		if (exit_code == 259) ; STILL_ACTIVE
+			throw Exception("Exit code 'STILL_ACTIVE' is reserved", -1, exit_code)
 
-			WinTitle := "ahk_pid " . this.ProcessID
-			while (hwnd := WinExist(WinTitle)) {
-				WinClose
-				if WinExist("ahk_id " . hwnd)
-					WinKill
-			}
+	; use gentler method - attempt to close window(s) first
+		prev_dhw := A_DetectHiddenWindows
+		DetectHiddenWindows On
 
-		DetectHiddenWindows, %prev_DHW%
-
-		; still running, force kill
-		if (this.Status == 0) {
-			hProcess := this.__Handle
-			DllCall("TerminateProcess", "Ptr", hProcess, "UInt", ExitCode)
+		wintitle := "ahk_pid " . this.ProcessID
+		while (hwnd := WinExist(wintitle)) {
+			WinClose
+			if WinExist("ahk_id " . hwnd)
+				WinKill
 		}
+
+		DetectHiddenWindows %prev_dhw%
+
+	; still running, force kill
+		if (this.Status == 0)
+			DllCall("TerminateProcess", "Ptr", this.__Handle, "UInt", exit_code)
 	}
 
 	class Pipe
 	{
 		__New(handle)
 		{
-			this.__Handle := handle
+			this.__Handle := handle + 0
 		}
 
 		__Delete()
@@ -174,10 +131,11 @@ class Subprocess
 		}
 
 		_Stream := ""
+
 		Stream[]
 		{
 			get {
-				if !this._Stream
+				if (!this._Stream)
 					this._Stream := FileOpen(this.__Handle, "h")
 				return this._Stream
 			}
@@ -188,6 +146,7 @@ class Subprocess
 			get {
 				return this.Stream.Encoding
 			}
+
 			set {
 				return this.Stream.Encoding := value
 			}
@@ -208,16 +167,19 @@ class Subprocess
 
 		ReadAll()
 		{
-			VarSetCapacity(buf, 4096), all := "", enc := this.Encoding
-			while read := this.Stream.RawRead(buf, 4096)
-				NumPut(0, buf, read, "UShort"), all .= StrGet(&buf, read, enc)
+			all := ""
+			encoding := this.Encoding
+			VarSetCapacity(data, 4096)
+			while (read := this.Stream.RawRead(data, 4096))
+				NumPut(0, data, read, "UShort"), all .= StrGet(&data, read, encoding)
 			return all
 		}
 
 		Peek(ByRef data:="", bytes:=4096, ByRef read:="", ByRef avail:="", ByRef left:="")
 		{
 			VarSetCapacity(data, bytes)
-			return DllCall("PeekNamedPipe", "Ptr", this.__Handle, "Ptr", &data, "UInt", bytes, "UInt*", read, "UInt*", avail, "UInt*", left)
+			return DllCall("PeekNamedPipe", "Ptr", this.__Handle, "Ptr", &data
+				, "UInt", bytes, "UInt*", read, "UInt*", avail, "UInt*", left)
 		}
 
 		; alternative - returns info as object(instead of ByRef) to allow usage in IPC(ComObjActive, etc.)
@@ -230,26 +192,14 @@ class Subprocess
 
 	class StreamWriter extends Subprocess.Pipe
 	{
-		Write(str)
+		Write(string)
 		{
-			return this.Stream.Write(str)
+			return this.Stream.Write(string)
 		}
 
-		WriteLine(str)
+		WriteLine(string)
 		{
-			return this.Stream.WriteLine(str)
-		}
-	}
-
-	; base object for methods implemented as "custom function object(s)"
-	class Functor
-	{
-		__Call(method, args*)
-		{
-			if IsObject(method)
-				return this.Call(method, args*)
-			else if (method == "")
-				return this.Call(args*)
+			return this.Stream.WriteLine(string)
 		}
 	}
 }
