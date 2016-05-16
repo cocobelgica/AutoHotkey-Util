@@ -96,6 +96,7 @@ class Subprocess
 	; use gentler method - attempt to close window(s) first
 		prev_dhw := A_DetectHiddenWindows
 		DetectHiddenWindows On
+		hwnd_lfw := WinExist() ; store current Last Found window
 
 		wintitle := "ahk_pid " . this.ProcessID
 		while (hwnd := WinExist(wintitle)) {
@@ -104,6 +105,7 @@ class Subprocess
 				WinKill
 		}
 
+		WinExist("ahk_id " . hwnd_lfw) ; restore Last Found window
 		DetectHiddenWindows %prev_dhw%
 
 	; still running, force kill
