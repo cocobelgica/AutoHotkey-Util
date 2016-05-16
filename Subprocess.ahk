@@ -54,9 +54,9 @@ class Subprocess
 
 	__Delete()
 	{
-		proc_info := this.GetAddress("PROCESS_INFORMATION")
-		DllCall("CloseHandle", "Ptr", NumGet(proc_info + 0))         ; hProcess
-		DllCall("CloseHandle", "Ptr", NumGet(proc_info + A_PtrSize)) ; hThread
+		  proc_info := this.GetAddress("PROCESS_INFORMATION")
+		, DllCall("CloseHandle", "Ptr", NumGet(proc_info + 0))         ; hProcess
+		, DllCall("CloseHandle", "Ptr", NumGet(proc_info + A_PtrSize)) ; hThread
 	}
 
 	__Handle[] ; hProcess
@@ -69,8 +69,7 @@ class Subprocess
 	ProcessID[]
 	{
 		get {
-			proc_info := this.GetAddress("PROCESS_INFORMATION")
-			return NumGet(proc_info + 2*A_PtrSize, "UInt") ; dwProcessId
+			return NumGet(this.GetAddress("PROCESS_INFORMATION") + 2*A_PtrSize, "UInt") ; dwProcessId
 		}
 	}
 
@@ -175,18 +174,16 @@ class Subprocess
 			return all
 		}
 
+		RawRead(ByRef var_or_address, bytes)
+		{
+			return this.Stream.RawRead(var_or_address, bytes)
+		}
+
 		Peek(ByRef data:="", bytes:=4096, ByRef read:="", ByRef avail:="", ByRef left:="")
 		{
 			VarSetCapacity(data, bytes)
 			return DllCall("PeekNamedPipe", "Ptr", this.__Handle, "Ptr", &data
 				, "UInt", bytes, "UInt*", read, "UInt*", avail, "UInt*", left)
-		}
-
-		; alternative - returns info as object(instead of ByRef) to allow usage in IPC(ComObjActive, etc.)
-		PeekEx(bytes:=4096)
-		{
-			if this.Peek(data, bytes, read, avail, left)
-				return { Data: StrGet(&data, read, this.Encoding), BytesRead: read, BytesAvail: avail, BytesLeft: left }
 		}
 	}
 
@@ -200,6 +197,11 @@ class Subprocess
 		WriteLine(string)
 		{
 			return this.Stream.WriteLine(string)
+		}
+
+		RawWrite(ByRef var_or_address, bytes)
+		{
+			return this.Stream.RawWrite(var_or_address, bytes)
 		}
 	}
 }
